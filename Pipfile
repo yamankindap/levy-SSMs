@@ -1,0 +1,29 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+numpy = "*"
+scipy = "*"
+scikit-learn = "*"
+openpyxl = "*"
+pandas = "*"
+jupyter = "*"
+jupyterlab = "*"
+jupytext = "*"
+ipykernel = "*"
+lxml = "*"
+tqdm = "*"
+daft = "*"
+tables = "*"
+jaxlib = "*"
+jax = "*"
+tensorflow-datasets = "*"
+tensorflow = "*"
+ipympl = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"
