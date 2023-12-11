@@ -173,6 +173,10 @@ class EnsembleBrownianMotionDrivenIntegral(EnsembleBrownianMotion):
 class NormalVarianceMeanProcessDrivenIntegral(StochasticIntegral):
     parameter_keys = ["shape", "mu", "sigma"]
 
+    # Benchmarking parameters
+    VECTORISE = False  # Vectorise implementation of moments.
+    VERIFY = False  # Verify vectorised implementation against naive implementation.
+
     def __init__(self, **kwargs):
         # Set parameters using the ParameterInterface class.
         super().__init__(**kwargs)
@@ -199,6 +203,42 @@ class NormalVarianceMeanProcessDrivenIntegral(StochasticIntegral):
 
         It also assumes that the driving NVM process is one dimensional.
         """
+        from statespace.models import VelocitySelector, expA_Langevin  # Can't import at top level due to circular dependency.
+
+        # Vectorised moments prototype
+        if self.VECTORISE and isinstance(self.L, VelocitySelector) and isinstance(self.expA, expA_Langevin):
+            mean = np.zeros((n_particles, self.L.shape[0], 1))
+            cov = np.zeros((n_particles, self.expA.shape[0], self.expA.shape[1]))
+            for i in range(n_particles):
+                x_series_particle = x_series[i]
+                t_series_particle = t_series[i]
+                dt_particle = t - t_series_particle
+                # Construct vectorised expA
+                expA_vec = np.zeros((x_series_particle.shape[0], *self.expA.shape))
+                expA_vec[:, 0, 0] = np.ones(x_series_particle.shape[0])
+                exp_theta_dt = np.exp(self.expA.theta * dt_particle)
+                expA_vec[:, 1, 1] = exp_theta_dt
+                expA_vec[:, 0, 1] = (exp_theta_dt - 1) / self.expA.theta
+                # Compute vectorised ft
+                ft_vec = np.squeeze(expA_vec @ self.L(), axis=-1)
+                # Compute mean
+                mean[i] = np.sum(
+                    ft_vec * self.mu * x_series_particle[:, None],
+                    axis=0, keepdims=True
+                ).T
+                # Compute covariance
+                cov[i] = np.sum(
+                    # TODO: there must be a cleaner way of doing this
+                    ft_vec[:, :, None] @ ft_vec[:, None, :] * self.sigma**2 * x_series_particle[:, None, None],
+                    axis=0
+                )
+
+            if not self.VERIFY:
+                return mean, cov
+            else:
+                mean_vec = mean.copy()
+                cov_vec = cov.copy()
+
         mean = np.zeros((n_particles, self.L.shape[0], 1))
         cov = np.zeros((n_particles, self.expA.shape[0], self.expA.shape[1]))
         for i in range(n_particles):
@@ -206,6 +246,12 @@ class NormalVarianceMeanProcessDrivenIntegral(StochasticIntegral):
                 mat = self.ft(t-t_series[i][j])
                 mean[i] += mat @ np.array([[self.mu]]) @ np.array([[x_series[i][j]]])
                 cov[i] += mat @ mat.T * np.array([[self.sigma**2]]) * np.array([[x_series[i][j]]])
+
+        if self.VERIFY:
+            assert np.allclose(mean, mean_vec)
+            assert np.allclose(cov, cov_vec)
+            print("Verification passed.")
+
         return mean, cov
 
     def sample(self, s=None, t=None, n_particles=1):
